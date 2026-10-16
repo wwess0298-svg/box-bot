@@ -27,14 +27,11 @@ try:
         info = ydl.extract_info(url, download=False)
         filesize = info.get('filesize') or info.get('filesize_approx')
         if filesize and filesize > MAX_FILE_SIZE_BYTES:
-            bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=msg.message_id,
-                text="عذراً، هذا الملف أكبر من 2 جيجابايت!",
-"تيليجرام لا حمسي للبوتات عفرب ملفات تتجاوز هذا الحجم.",
-message.chat.id,
-msg.message_id,
-parse_mode="HTML"
+bot.edit_message_text(
+    "عذراً، هذا الملف أكبر من 2 جيجابايت!",
+    chat_id=message.chat.id,
+    message_id=msg.message_id,
+    parse_mode="HTML"
 )
 return
 bot.edit_message_text("📥 <b>االنتظار برجاء ...(الكبيرة لألحجام) اآلن التنزيل ةيلمع بدأت.>/b>", message.chat.id, msg.message_id, parse_mode="HTML")
