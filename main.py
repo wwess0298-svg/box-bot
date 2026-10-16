@@ -9,9 +9,7 @@ bot = telebot.TeleBot(TOKEN)
 MAX_FILE_SIZE_BYTES = 1.9 * 1024 * 1024 * 1024
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-بيك اي أحمد يف بوت التحميالت ةيرصحلا" ,message(to_reply.bot
-ابعت يل رابط الفيلم أو المسلسل المباشر) أقل من 2 اجيج( وهبدأ أتعامل معاه هلمحأو هعفرأو لك n 🎬⚡\لاهأً
-(". فوراً
+bot.reply_to(message, "أهلاً بيك يا أحمد في بوت التحميل، ابعت لي الرابط فوراً.")
 @bot.message_handler(func=lambda message: True)
 def download_media(message):
 url = message.text.strip()
