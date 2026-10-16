@@ -16,7 +16,7 @@ url = message.text.strip()
 if not url.startswith("http"):
 (".https أو http من فضلك ابعت رابط حيحص يبدأ بـ ️⚠" ,message(to_reply.bot
 return
-msg = bot.reply_to(message, "جاري التحقق من الرابط...")
+msg = bot.reply_to(message, "جاري التحقق من الرابط وتحميل الملف...")
 ("HTML="mode_parse ,>"b/<...جار التحقق من الرابط ةحاسملاو
 output_filename = "downloaded_media.mp4"
 yt_dlp إعدادات #
