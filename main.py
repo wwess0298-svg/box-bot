@@ -16,7 +16,6 @@ if not url.startswith("http"):
     return
 msg = bot.reply_to(message, "جاري التحقق من الرابط وتحميل الملف...")
 output_filename = "downloaded_media.mp4"
-yt_dlp إعدادات #
 ydl_opts = {
 'format': 'best',
 'outtmpl': output_filename,
