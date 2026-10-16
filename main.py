@@ -2,10 +2,8 @@ import os
 import time
 import telebot
 import yt_dlp
-# حط التوكن بتاع البوت انه
 TOKEN = "8852120082:AAGwIcax_Cc625HuBe7TIgAYH5Z2ADlb6dk"
 bot = telebot.TeleBot(TOKEN)
-# الحد ىصقلأا لحجم الملف المسموح هعفرب لتيليجرام) بالبايت( - انه اهنيددحم يلاوح 1.9 اجيج بايت) أقل من حد تيليجرام 2 اجيج بقليل لتفادي األخطاء(
 MAX_FILE_SIZE_BYTES = 1.9 * 1024 * 1024 * 1024
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
