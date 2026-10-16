@@ -10,7 +10,7 @@ def send_welcome(message):
     bot.reply_to(message, "أهلاً بيك يا أحمد في بوت التحميل، ابعت لي الرابط فوراً.")
 @bot.message_handler(func=lambda message: True)
 def download_media(message):
-url = message.text.strip()
+    url = message.text.strip()
 if not url.startswith("http"):
 bot.reply_to(message, "من فضلك ابعت رابط صحيح يبدأ بـ http أو https.")
 return
