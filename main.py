@@ -14,10 +14,9 @@ bot.reply_to(message, "أهلاً بيك يا أحمد في بوت التحمي�
 def download_media(message):
 url = message.text.strip()
 if not url.startswith("http"):
-(".https أو http من فضلك ابعت رابط حيحص يبدأ بـ ️⚠" ,message(to_reply.bot
+bot.reply_to(message, "من فضلك ابعت رابط صحيح يبدأ بـ http أو https.")
 return
 msg = bot.reply_to(message, "جاري التحقق من الرابط وتحميل الملف...")
-("HTML="mode_parse ,>"b/<...جار التحقق من الرابط ةحاسملاو
 output_filename = "downloaded_media.mp4"
 yt_dlp إعدادات #
 ydl_opts = {
