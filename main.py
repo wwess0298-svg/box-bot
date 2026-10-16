@@ -24,7 +24,7 @@ ydl_opts = {
 }
 try:
 # فحص حجم الفيديو قبل التحميل لو الرابط مباشر ويدعم استخراج المعلومات اعيرسً
-with yt_dlp.YoutubeDL({'format': 'best', 'noplaylist': True}) as ydl:
+ with yt_dlp.YoutubeDL({'format': 'best', 'noplaylist': True}) as ydl:
 info = ydl.extract_info(url, download=False)
 filesize = info.get('filesize') or info.get('filesize_approx')
 if filesize and filesize > MAX_FILE_SIZE_BYTES:
