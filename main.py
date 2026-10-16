@@ -44,12 +44,10 @@ ydl.download([url])
 if os.path.exists(output_filename):
 actual_size = os.path.getsize(output_filename)
 if actual_size > MAX_FILE_SIZE_BYTES:
-bot.edit_message_text("❌ اجيج 2) لتيليجرام المسموح الحد من أكبر المتحمل الملف(.", message.chat.id, msg.message_id)
+bot.edit_message_text("عذراً، الملف أكبر من 2 جيجابايت!", chat_id=message.chat.id, message_id=msg.message_id)
 os.remove(output_filename)
 return
-bot.edit_message_text("⬆️ <b> ،التنزيل من االنتهاء تم
-ِ
-تيليجرام ىلإ الكبير الملف عفر جار ...>/b>", message.chat.id, msg.message_id, parse_mode="HTML")
+bot.edit_message_text("تم الانتهاء من التنزيل بنجاح!", chat_id=message.chat.id, message_id=msg.message_id)
 # إرسال الفيديو للمستخدم
 with open(output_filename, 'rb') as video:
 bot.send_video(
