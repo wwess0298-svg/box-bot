@@ -31,7 +31,6 @@ bot.reply_to(message, "عذراً، هذا الملف أكبر من 2 جيجاب
     chat_id=message.chat.id,
     message_id=msg.message_id,
     parse_mode="HTML"
-)
 return
 bot.edit_message_text("📥 <b>االنتظار برجاء ...(الكبيرة لألحجام) اآلن التنزيل ةيلمع بدأت.>/b>", message.chat.id, msg.message_id, parse_mode="HTML")
 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
