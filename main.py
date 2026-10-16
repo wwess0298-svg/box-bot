@@ -1,54 +1,32 @@
-import telebot
-import yt_dlp
-import os
+‏لصنع بوت تلجرام لتحميل الأفلام من أي موقع، ستحتاج إلى استخدام لغة برمجة مثل Python ومكتبة python-telegram-bot. 
 
-# حط التوكن بتاع بوتك هنا بين العلامتين
-TOKEN = "8793171859:AAEc0jHrdsB95A2b5ISKD6bR2-6syntzuKE"
-bot = telebot.TeleBot(TOKEN)
+إليك مثال أساسي لبنية البوت:
 
-MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024  # حد أقصى 2 جيجابايت
+‏import os
+from telegram import Update
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! أرسل لي رابط الفيديو وسأقوم بتحميله لك.")
+# دالة التعامل مع الرابط المرسل
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text
+    await update.message.reply_text(f"جاري جلب وفحص الرابط: {url}")
+    
+    # هنا أضف كود التحميل الخاص بك (مثلاً باستخدام yt-dlp أو requests)
+    # وم ثم إرسال الملف للمستخدم باستخدام update.message.reply_document()
 
-@bot.message_handler(func=lambda message: True)
-def download_media(message):
-    url = message.text.strip()
-    if not url.startswith("http"):
-        bot.reply_to(message, "من فضلك ابعت رابط صحيح يبدأ بـ http أو https")
-        return
+def main():
+    # ضع توكن البوت الخاص بك هنا
+    application = ApplicationBuilder().token("YOUR_BOT_TOKEN").build()
 
-    msg = bot.reply_to(message, "⏳ جاري التحقق من الرابط وتحميل الملف...")
-    output_filename = "download_media.mp4"
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    ydl_opts = {
-        'format': 'best',
-        'outtmpl': output_filename,
-        'noplaylist': True
-    }
+    print("البوت يعمل الآن...")
+    application.run_polling()
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            filesize = info.get('filesize') or info.get('filesize_approx', 0)
-            
-            if filesize and filesize > MAX_FILE_SIZE_BYTES:
-                bot.reply_to(message, "عذراً، هذا الملف أكبر من 2 جيجابايت ولا يمكن للبوت تحميله.")
-                return
+if __name__ == '__main__':
+    main()‏
 
-            ydl.download([url])
-
-        if os.path.exists(output_filename):
-            with open(output_filename, 'rb') as video:
-                bot.send_video(message.chat.id, video, caption="إليك الفيديو الخاص بك!")
-            os.remove(output_filename)
-        else:
-            bot.reply_to(message, "حدث خطأ أثناء تحميل الملف، حاول مرة أخرى.")
-            
-    except Exception as e:
-        bot.reply_to(message, f"حدث خطأ: {str(e)}")
-
-if name == "main":
-    print("Bot is running...")
-    bot.infinity_polling()
+خطوات التنفيذ:
+1. أنشئ بوت جديد عبر @BotFather في تلجرام واحصل على الـ Token.
+2. ثبت المكتبة المطلوبة في بيئة بايثون عبر الأرمر: pip install python-telegram-bot.
+3. ستحتاج إلى دمج أداة تحميل مثل yt-dlp أو مكتبة requests و BeautifulSoup لاستخراج روابط التحميل المباشرة من المواقع المختلفة بناءً على طبيعة كل موقع.‏
