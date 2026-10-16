@@ -30,7 +30,7 @@ info = ydl.extract_info(url, download=False)
 filesize = info.get('filesize') or info.get('filesize_approx')
 if filesize and filesize > MAX_FILE_SIZE_BYTES:
 bot.edit_message_text(
-"n>\b/!<عذرا حجم هذا الملف أكبر من 2 اجيج بايت ،ً <b"❌ <
+bot.reply_to(message, "عذراً، هذا الملف أكبر من 2 جيجابايت!")
 "تيليجرام لا حمسي للبوتات عفرب ملفات تتجاوز هذا الحجم.",
 message.chat.id,
 msg.message_id,
