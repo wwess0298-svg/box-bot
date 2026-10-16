@@ -12,7 +12,7 @@ def send_welcome(message):
 def download_media(message):
     url = message.text.strip()
 if not url.startswith("http"):
-bot.reply_to(message, "من فضلك ابعت رابط صحيح يبدأ بـ http أو https.")
+bot.reply_to(message, "من فضلك ابعت رابط صحيح يبدأ بـ http أو https")
 return
 msg = bot.reply_to(message, "جاري التحقق من الرابط وتحميل الملف...")
 output_filename = "downloaded_media.mp4"
