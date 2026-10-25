@@ -67,15 +67,14 @@ def download_media(message):
         
         # إرسال الفيديو للمستخدم
 with open(output_filename, 'rb') as video_file:
-    bot.send_video(
-        message.chat.id,
-        video_file,
-        caption="<b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
-        parse_mode="HTML",
-        supports_streaming=True,
-        timeout=300
-    )
-            
+        bot.send_video(
+            message.chat.id,
+            video_file,
+            caption="<b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
+            parse_mode="HTML",
+            supports_streaming=True,
+            timeout=300
+        )
         bot.delete_message(message.chat.id, msg.message_id)
         
     except Exception as e:
