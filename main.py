@@ -28,7 +28,7 @@ app = Client(
     "box_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
+    bot_token=8924747653:AAH75pRwcp5RrEVAZRiYHRncij6XVszA7UY
     parse_mode=ParseMode.HTML,
     max_concurrent_transmissions=4,
 )
