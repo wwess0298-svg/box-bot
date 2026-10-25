@@ -4,7 +4,7 @@ import telebot
 import yt_dlp
 
 # حط التوكن بتاع البوت هنا
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+TOKEN = "8793171859:AAEc0jHrdsB95A2b5ISKD6bR2-6syntzuKE"
 bot = telebot.TeleBot(TOKEN)
 
 # الحد الأقصى لحجم الملف المسموح برفعه لتيليجرام (بالبايت) - هنا محددينها حوالي 1.9 جيجا بايت (أقل من حد تيليجرام 2 جيجا بقليل لتفادي الأخطاء)
