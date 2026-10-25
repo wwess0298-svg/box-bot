@@ -66,14 +66,15 @@ def download_media(message):
         bot.edit_message_text("⬆️ <b>تم الانتهاء من التنزيل، جارِ رفع الملف الكبير إلى تيليجرام...</b>", message.chat.id, msg.message_id, parse_mode="HTML")
         
         # إرسال الفيديو للمستخدم
-        ydl_opts = {
-    'format': 'best',
-    'outtmpl': output_filename,
-    'noplaylist': True,
-    'geo_bypass': True,
-    'extractor_args': {'generic': {'impersonate': True}},
-    'progress_hooks': [lambda d: progress_hook(d, msg, bot)]
-}
+with open(output_filename, 'rb') as video_file:
+    bot.send_video(
+        message.chat.id,
+        video_file,
+        caption="<b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
+        parse_mode="HTML",
+        supports_streaming=True,
+        timeout=300
+    )
             
         bot.delete_message(message.chat.id, msg.message_id)
         
