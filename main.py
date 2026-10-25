@@ -26,10 +26,15 @@ UPDATE_EVERY = 3  # تحديث رسالة التقدم كل كام ثانية
 
 app = Client(
     "box_bot",
+    API_ID = ...
+API_HASH = ...
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+...
+app = Client(
+    "box_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token="8816237824:AAFAje2H1FqZsGAYhc0sJYqHJAYUVCnmiM8"
-    
+    bot_token=BOT_TOKEN,
     parse_mode=ParseMode.HTML,
     max_concurrent_transmissions=4,
 )
