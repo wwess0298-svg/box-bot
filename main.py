@@ -8,6 +8,7 @@ import shutil
 import asyncio
 import tempfile
 import subprocess
+import urllib.request
 
 import yt_dlp
 from pyrogram import Client, filters
@@ -24,12 +25,6 @@ MAX_FILE_SIZE = int(1.95 * 1024 * 1024 * 1024)  # ~1.95 جيجا (حد تيلي�
 FORMAT = "best[ext=mp4]/best"
 UPDATE_EVERY = 3  # تحديث رسالة التقدم كل كام ثانية
 
-app = Client(
-    "box_bot",
-    API_ID = ...
-API_HASH = ...
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-...
 app = Client(
     "box_bot",
     api_id=API_ID,
@@ -118,6 +113,29 @@ async def safe_edit(msg, text, kb=None):
 
 
 # ============================== yt-dlp ==============================
+def probe_size(info):
+    """يحاول يعرف حجم الملف من الرابط المباشر لو yt-dlp ما عرفوش."""
+    try:
+        direct = info.get("url")
+        if not direct:
+            return None
+        headers = dict(info.get("http_headers") or {})
+        headers["Range"] = "bytes=0-0"
+        req = urllib.request.Request(direct, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            cr = r.headers.get("Content-Range")
+            if cr and "/" in cr:
+                total = cr.rsplit("/", 1)[1]
+                if total.isdigit():
+                    return int(total)
+            cl = r.headers.get("Content-Length")
+            if cl and cl.isdigit() and r.status == 200:
+                return int(cl)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_info(url):
     opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "format": FORMAT}
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -128,7 +146,7 @@ def fetch_info(url):
         title = info.get("title") or "video"
         if not title.lower().endswith("." + ext.lower()):
             title = f"{title}.{ext}"
-        size = info.get("filesize") or info.get("filesize_approx")
+        size = info.get("filesize") or info.get("filesize_approx") or probe_size(info)
         return {"title": title, "size": size}
 
 
@@ -141,12 +159,54 @@ def download(url, tmp_dir, hook):
         "no_warnings": True,
         "progress_hooks": [hook],
     }
+    if shutil.which("aria2c"):
+        opts["external_downloader"] = {"default": "aria2c"}
+        opts["external_downloader_args"] = {
+            "aria2c": ["-x16", "-s16", "-k1M", "--file-allocation=none"]
+        }
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
-    files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir)]
+    files = [
+        os.path.join(tmp_dir, f)
+        for f in os.listdir(tmp_dir)
+        if not f.endswith((".aria2", ".part", ".ytdl"))
+    ]
     if not files:
         raise RuntimeError("لم يتم العثور على الملف بعد التنزيل.")
     return max(files, key=os.path.getsize)
+
+
+def dir_bytes(tmp_dir):
+    """حجم اللي اتنزّل فعلاً (بيتجاهل المساحات الفاضية) عشان شريط التقدم."""
+    total = 0
+    try:
+        for f in os.listdir(tmp_dir):
+            if f.endswith(".aria2"):
+                continue
+            st = os.stat(os.path.join(tmp_dir, f))
+            total += st.st_blocks * 512 if st.st_blocks else st.st_size
+    except Exception:
+        pass
+    return total
+
+
+async def monitor_download(msg, job, tmp_dir, kb):
+    """بيتابع حجم الملف كل كام ثانية ويحدّث الرسالة، ويوقف aria2 لو اتضغط إلغاء."""
+    title = job["title"]
+    last_bytes, last_t = 0, time.time()
+    while True:
+        await asyncio.sleep(UPDATE_EVERY)
+        if job["cancel"]:
+            subprocess.run(["pkill", "-f", tmp_dir], capture_output=True)
+            return
+        done = dir_bytes(tmp_dir)
+        now = time.time()
+        speed = (done - last_bytes) / (now - last_t) if now > last_t else 0
+        last_bytes, last_t = done, now
+        total = job["size"]
+        if total and done > total:
+            done = total
+        await safe_edit(msg, download_text(title, done, total, speed), kb)
 
 
 # ============================== ffprobe / ffmpeg ==============================
@@ -303,7 +363,11 @@ async def run_job(client, msg, job_id, job):
             text = download_text(title, done, total, d.get("speed"))
             asyncio.run_coroutine_threadsafe(safe_edit(msg, text, cancel_kb), loop)
 
-        path = await asyncio.to_thread(download, job["url"], tmp_dir, hook)
+        monitor = asyncio.create_task(monitor_download(msg, job, tmp_dir, cancel_kb))
+        try:
+            path = await asyncio.to_thread(download, job["url"], tmp_dir, hook)
+        finally:
+            monitor.cancel()
 
         if job["cancel"]:
             raise Cancelled()
