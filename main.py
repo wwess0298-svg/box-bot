@@ -66,14 +66,15 @@ def download_media(message):
         bot.edit_message_text("⬆️ <b>تم الانتهاء من التنزيل، جارِ رفع الملف الكبير إلى تيليجرام...</b>", message.chat.id, msg.message_id, parse_mode="HTML")
         
         # إرسال الفيديو للمستخدم
-        with open(output_filename, 'rb') as video:
-            bot.send_video(
-                message.chat.id, 
-                video, 
-                caption="🎬 <b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
-                parse_mode="HTML",
-                timeout=300 # مهلة زمنية أطول للملفات الكبيرة عشان ميفصلش أثناء الرفع
-            )
+        with open(output_filename, 'rb') as video_file:
+    bot.send_video(
+        message.chat.id,
+        video_file,
+        caption="<b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
+        parse_mode="HTML",
+        supports_streaming=True,
+        timeout=300
+    )
             
         bot.delete_message(message.chat.id, msg.message_id)
         
