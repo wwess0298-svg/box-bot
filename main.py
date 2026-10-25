@@ -1,82 +1,117 @@
-from __future__ import annotations
-
 import os
-from dataclasses import dataclass
-from pathlib import Path
+import time
+import telebot
+import yt_dlp
 
-from dotenv import load_dotenv
+# حط التوكن بتاع البوت هنا
+TOKEN = "YOUR_BOT_TOKEN_HERE"
+bot = telebot.TeleBot(TOKEN)
 
+# الحد الأقصى لحجم الملف المسموح برفعه لتيليجرام (بالبايت) - هنا محددينها حوالي 1.9 جيجا بايت (أقل من حد تيليجرام 2 جيجا بقليل لتفادي الأخطاء)
+MAX_FILE_SIZE_BYTES = 1.9 * 1024 * 1024 * 1024 
 
-def _parse_int_set(raw_value: str | None) -> set[int]:
-    if not raw_value:
-        return set()
-    values: set[int] = set()
-    for chunk in raw_value.replace(",", " ").split():
-        if chunk:
-            values.add(int(chunk))
-    return values
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "أهلاً بيك يا أحمد في بوت التحميلات الحصرية 🎬⚡\nابعت لي رابط الفيلم أو المسلسل المباشر (أقل من 2 جيجا) وهبدأ أتعامل معاه وأحمله وأرفعه لك فوراً.")
 
+@bot.message_handler(func=lambda message: True)
+def download_media(message):
+    url = message.text.strip()
+    
+    if not url.startswith("http"):
+        bot.reply_to(message, "⚠️ من فضلك ابعت رابط صحيح يبدأ بـ http أو https.")
+        return
+    
+    msg = bot.reply_to(message, "⏳ <b>جارِ التحقق من الرابط والمساحة...</b>", parse_mode="HTML")
+    
+    output_filename = "downloaded_media.mp4"
+    
+    # إعدادات yt_dlp
+    ydl_opts = {
+        'format': 'best',
+        'outtmpl': output_filename,
+        'noplaylist': True,
+        'progress_hooks': [lambda d: progress_hook(d, msg, message.chat.id)],
+    }
+    
+    try:
+        # فحص حجم الفيديو قبل التحميل لو الرابط مباشر ويدعم استخراج المعلومات سريعاً
+        with yt_dlp.YoutubeDL({'format': 'best', 'noplaylist': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            filesize = info.get('filesize') or info.get('filesize_approx')
+            
+            if filesize and filesize > MAX_FILE_SIZE_BYTES:
+                bot.edit_message_text(
+                    "❌ <b>عذراً، حجم هذا الملف أكبر من 2 جيجا بايت!</b>\n"
+                    "تيليجرام لا يسمح للبوتات برفع ملفات تتجاوز هذا الحجم.",
+                    message.chat.id, 
+                    msg.message_id, 
+                    parse_mode="HTML"
+                )
+                return
 
-def _parse_chunk_size(raw_value: str | None) -> int:
-    size = int(raw_value or "128")
-    return size * 1024 if size < 1024 else size
+        bot.edit_message_text("📥 <b>بدأت عملية التنزيل الآن (للأحجام الكبيرة)... برجاء الانتظار.</b>", message.chat.id, msg.message_id, parse_mode="HTML")
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+            
+        # التحقق النهائي من حجم الملف المنزل على السيرفر
+        if os.path.exists(output_filename):
+            actual_size = os.path.getsize(output_filename)
+            if actual_size > MAX_FILE_SIZE_BYTES:
+                bot.edit_message_text("❌ الملف المتحمل أكبر من الحد المسموح لتيليجرام (2 جيجا).", message.chat.id, msg.message_id)
+                os.remove(output_filename)
+                return
 
+        bot.edit_message_text("⬆️ <b>تم الانتهاء من التنزيل، جارِ رفع الملف الكبير إلى تيليجرام...</b>", message.chat.id, msg.message_id, parse_mode="HTML")
+        
+        # إرسال الفيديو للمستخدم
+        with open(output_filename, 'rb') as video:
+            bot.send_video(
+                message.chat.id, 
+                video, 
+                caption="🎬 <b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
+                parse_mode="HTML",
+                timeout=300 # مهلة زمنية أطول للملفات الكبيرة عشان ميفصلش أثناء الرفع
+            )
+            
+        bot.delete_message(message.chat.id, msg.message_id)
+        
+    except Exception as e:
+        try:
+            bot.edit_message_text(f"❌ <b>حدث خطأ أثناء المعالجة أو التحميل:</b>\n<code>{str(e)}</code>", message.chat.id, msg.message_id, parse_mode="HTML")
+        except:
+            bot.send_message(message.chat.id, f"❌ حدث خطأ: {str(e)}")
+        
+    finally:
+        # مسح الملف من السيرفر فوراً عشان نحافظ على المساحة
+        if os.path.exists(output_filename):
+            os.remove(output_filename)
 
-@dataclass(slots=True)
-class Settings:
-    bot_token: str
-    owner_id: int
-    auth_users: set[int]
-    download_location: Path
-    chunk_size: int
-    http_proxy: str
-    process_max_timeout: int
+# دالة تتبع التقدم والسرعة
+last_update_time = 0
+def progress_hook(d, msg, chat_id):
+    global last_update_time
+    if d['status'] == 'downloading':
+        current_time = time.time()
+        if current_time - last_update_time > 4: # تحديث كل 4 ثواني
+            try:
+                percent = d.get('_percent_str', '0%').strip()
+                speed = d.get('_speed_str', 'N/A').strip()
+                eta = d.get('_eta_str', 'N/A').strip()
+                
+                text = (
+                    f"📥 <b>جاري تنزيل الملف الكبير...</b>\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"📊 النسبة: <b>{percent}</b>\n"
+                    f"🚀 السرعة: <code>{speed}</code>\n"
+                    f"⏱️ المتبقي: <code>{eta}</code>\n"
+                    f"━━━━━━━━━━━━━━━"
+                )
+                bot.edit_message_text(text, chat_id, msg.message_id, parse_mode="HTML")
+                last_update_time = current_time
+            except Exception:
+                pass
 
-    @classmethod
-    def from_env(cls) -> "Settings":
-        load_dotenv()
-
-        bot_token = os.environ.get("BOT_TOKEN", "").strip()
-        owner_id = int(os.environ.get("OWNER_ID", "0").strip() or "0")
-        if not bot_token:
-            raise RuntimeError("BOT_TOKEN is required")
-        if not owner_id:
-            raise RuntimeError("OWNER_ID is required")
-
-        auth_users = _parse_int_set(os.environ.get("AUTH_USERS"))
-        auth_users.add(owner_id)
-
-        download_location = Path(
-            os.environ.get("DOWNLOAD_LOCATION", "./DOWNLOADS").strip() or "./DOWNLOADS"
-        )
-
-        return cls(
-            bot_token=bot_token,
-            owner_id=owner_id,
-            auth_users=auth_users,
-            download_location=download_location,
-            chunk_size=_parse_chunk_size(os.environ.get("CHUNK_SIZE")),
-            http_proxy=os.environ.get("HTTP_PROXY", "").strip(),
-            process_max_timeout=int(os.environ.get("PROCESS_MAX_TIMEOUT", "3700")),
-        )
-
-    @property
-    def thumbnails_dir(self) -> Path:
-        return self.download_location / "thumbnails"
-
-    @property
-    def requests_dir(self) -> Path:
-        return self.download_location / "requests"
-
-    @property
-    def work_dir(self) -> Path:
-        return self.download_location / "work"
-
-    def ensure_directories(self) -> None:
-        for path in (
-            self.download_location,
-            self.thumbnails_dir,
-            self.requests_dir,
-            self.work_dir,
-        ):
-            path.mkdir(parents=True, exist_ok=True)
+print("Bot is running and ready for large files...")
+bot.infinity_polling()
