@@ -4,7 +4,7 @@ import telebot
 import yt_dlp
 
 # حط التوكن بتاع البوت هنا
-TOKEN = "8924747653:AAH75pRwcp5RrEVAZRiYHRncij6XVszA7UY"
+TOKEN = "YOUR_BOT_TOKEN_HERE"
 bot = telebot.TeleBot(TOKEN)
 
 # الحد الأقصى لحجم الملف المسموح برفعه لتيليجرام (بالبايت) - هنا محددينها حوالي 1.9 جيجا بايت (أقل من حد تيليجرام 2 جيجا بقليل لتفادي الأخطاء)
@@ -27,7 +27,7 @@ def download_media(message):
     output_filename = "downloaded_media.mp4"
     
     # إعدادات yt_dlp
- ydl_opts = {
+    ydl_opts = {
         'format': 'best',
         'outtmpl': output_filename,
         'noplaylist': True,
@@ -66,15 +66,14 @@ def download_media(message):
         bot.edit_message_text("⬆️ <b>تم الانتهاء من التنزيل، جارِ رفع الملف الكبير إلى تيليجرام...</b>", message.chat.id, msg.message_id, parse_mode="HTML")
         
         # إرسال الفيديو للمستخدم
-        with open(output_filename, 'rb') as video_file:
-    bot.send_video(
-        message.chat.id,
-        video_file,
-        caption="<b>تم الرفع بنجاح!</b>\n⚡ بواسطة بوت: BOX",
-        parse_mode="HTML",
-        supports_streaming=True,
-        timeout=300
-    )
+        ydl_opts = {
+    'format': 'best',
+    'outtmpl': output_filename,
+    'noplaylist': True,
+    'geo_bypass': True,
+    'extractor_args': {'generic': {'impersonate': True}},
+    'progress_hooks': [lambda d: progress_hook(d, msg, bot)]
+}
             
         bot.delete_message(message.chat.id, msg.message_id)
         
