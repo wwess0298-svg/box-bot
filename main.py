@@ -27,12 +27,14 @@ def download_media(message):
     output_filename = "downloaded_media.mp4"
     
     # إعدادات yt_dlp
-    ydl_opts = {
-        'format': 'best',
-        'outtmpl': output_filename,
-        'noplaylist': True,
-        'progress_hooks': [lambda d: progress_hook(d, msg, message.chat.id)],
-    }
+   ydl_opts = {
+    'format': 'best',
+    'outtmpl': output_filename,
+    'noplaylist': True,
+    'geo_bypass': True,
+    'extractor_args': {'generic': {'impersonate': True}},
+    'progress_hooks': [lambda d: progress_hook(d, msg, bot)]
+}
     
     try:
         # فحص حجم الفيديو قبل التحميل لو الرابط مباشر ويدعم استخراج المعلومات سريعاً
