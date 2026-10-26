@@ -8,6 +8,8 @@ import shutil
 import asyncio
 import tempfile
 import subprocess
+import ssl
+import urllib.parse
 import urllib.request
 
 import yt_dlp
@@ -24,6 +26,11 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 MAX_FILE_SIZE = int(1.95 * 1024 * 1024 * 1024)  # ~1.95 جيجا (حد تيليجرام للبوتات 2 جيجا)
 FORMAT = "best[ext=mp4]/best"
 UPDATE_EVERY = 3  # تحديث رسالة التقدم كل كام ثانية
+BROWSER_UA = (
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+)
+SSL_CTX = ssl._create_unverified_context()  # بعض المواقع شهادتها ناقصة
 
 app = Client(
     "box_bot",
@@ -120,9 +127,10 @@ def probe_size(info):
         if not direct:
             return None
         headers = dict(info.get("http_headers") or {})
+        headers.setdefault("User-Agent", BROWSER_UA)
         headers["Range"] = "bytes=0-0"
         req = urllib.request.Request(direct, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=15, context=SSL_CTX) as r:
             cr = r.headers.get("Content-Range")
             if cr and "/" in cr:
                 total = cr.rsplit("/", 1)[1]
@@ -136,8 +144,19 @@ def probe_size(info):
     return None
 
 
-def fetch_info(url):
-    opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "format": FORMAT}
+def ytdlp_base_opts():
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "http_headers": {"User-Agent": BROWSER_UA},
+    }
+
+
+def fetch_info_ytdlp(url):
+    opts = ytdlp_base_opts()
+    opts["format"] = FORMAT
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if info.get("entries"):
@@ -147,18 +166,85 @@ def fetch_info(url):
         if not title.lower().endswith("." + ext.lower()):
             title = f"{title}.{ext}"
         size = info.get("filesize") or info.get("filesize_approx") or probe_size(info)
-        return {"title": title, "size": size}
+        return {"title": title, "size": size, "direct": False}
 
 
-def download(url, tmp_dir, hook):
-    opts = {
+def direct_info(url):
+    """للروابط المباشرة اللي yt-dlp مش بيعرف يقراها (SSL ناقص / 403)."""
+    req = urllib.request.Request(
+        url, headers={"User-Agent": BROWSER_UA, "Range": "bytes=0-0"}
+    )
+    with urllib.request.urlopen(req, timeout=20, context=SSL_CTX) as r:
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        if "text/html" in ctype:
+            return None
+        size = None
+        cr = r.headers.get("Content-Range")
+        cl = r.headers.get("Content-Length") or ""
+        if cr and "/" in cr and cr.rsplit("/", 1)[1].isdigit():
+            size = int(cr.rsplit("/", 1)[1])
+        elif cl.isdigit() and r.status == 200:
+            size = int(cl)
+        name = None
+        cd = r.headers.get("Content-Disposition") or ""
+        m = re.search(r"filename\*?=(?:UTF-8\'\')?\"?([^\";]+)", cd)
+        if m:
+            name = urllib.parse.unquote(m.group(1))
+        if not name:
+            name = urllib.parse.unquote(os.path.basename(urllib.parse.urlparse(url).path))
+        name = name or "video"
+        if not os.path.splitext(name)[1]:
+            name += ".mp4"
+        return {"title": name, "size": size, "direct": True}
+
+
+def fetch_info(url):
+    try:
+        return fetch_info_ytdlp(url)
+    except Exception as first_error:
+        try:
+            info = direct_info(url)
+        except Exception:
+            info = None
+        if info:
+            return info
+        raise first_error
+
+
+def direct_download(url, tmp_dir, title):
+    ext = os.path.splitext(title)[1] or ".mp4"
+    name = "video" + ext
+    path = os.path.join(tmp_dir, name)
+    if shutil.which("aria2c"):
+        r = subprocess.run(
+            [
+                "aria2c", "-x16", "-s16", "-k1M", "--file-allocation=none",
+                "--max-tries=3", "--check-certificate=false",
+                f"--user-agent={BROWSER_UA}",
+                "--console-log-level=error", "--summary-interval=0",
+                "--download-result=hide",
+                "-d", tmp_dir, "-o", name, url,
+            ],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0 or not os.path.exists(path):
+            raise RuntimeError("aria2c: " + (r.stderr or r.stdout or "failed")[-300:])
+        return path
+    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA})
+    with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r, open(path, "wb") as f:
+        shutil.copyfileobj(r, f, 1024 * 1024)
+    return path
+
+
+def download(url, tmp_dir, hook, direct=False, title="video.mp4"):
+    if direct:
+        return direct_download(url, tmp_dir, title)
+    opts = ytdlp_base_opts()
+    opts.update({
         "format": FORMAT,
         "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
         "progress_hooks": [hook],
-    }
+    })
     if shutil.which("aria2c"):
         opts["external_downloader"] = {"default": "aria2c"}
         opts["external_downloader_args"] = {
@@ -290,6 +376,7 @@ async def on_link(client, message):
         "user_id": message.from_user.id,
         "cancel": False,
         "started": False,
+        "direct": info.get("direct", False),
     }
 
     kb = InlineKeyboardMarkup(
@@ -365,7 +452,9 @@ async def run_job(client, msg, job_id, job):
 
         monitor = asyncio.create_task(monitor_download(msg, job, tmp_dir, cancel_kb))
         try:
-            path = await asyncio.to_thread(download, job["url"], tmp_dir, hook)
+            path = await asyncio.to_thread(
+                download, job["url"], tmp_dir, hook, job["direct"], title
+            )
         finally:
             monitor.cancel()
 
