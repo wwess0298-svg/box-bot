@@ -31,6 +31,8 @@ BROWSER_UA = (
     "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
 )
 SSL_CTX = ssl._create_unverified_context()  # بعض المواقع شهادتها ناقصة
+MAX_QUALITY = 1080   # أعلى جودة بتظهر في قايمة Dailymotion / VK
+JOB_TTL = 6 * 3600   # طلبات الجودات اللي ماتكمّلتش بتتمسح بعد 6 ساعات
 
 app = Client(
     "box_bot",
@@ -72,6 +74,15 @@ def human_time(sec):
     return f"{h} ساعة و {m} دقيقة"
 
 
+def fmt_duration(sec):
+    if not sec:
+        return ""
+    sec = int(sec)
+    h, r = divmod(sec, 3600)
+    m, s = divmod(r, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
 def green_bar(p, n=10):
     filled = max(0, min(n, int(p / 100 * n)))
     return "🟩" * filled + "⬜" * (n - filled)
@@ -82,8 +93,11 @@ def shade_bar(p, n=10):
     return "[" + "▓" * filled + "░" * (n - filled) + "]"
 
 
-def header(title):
-    return f"<b>{html.escape(title)}</b>\n{SEP}\n\n"
+def header(title, label=None):
+    text = f"<b>{html.escape(title)}</b>\n"
+    if label:
+        text += f"{html.escape(label)}\n"
+    return text + f"{SEP}\n\n"
 
 
 def download_text(title, done, total, speed):
@@ -334,13 +348,464 @@ def make_thumb(path, duration, out_path):
     return None
 
 
+# ============================== Dailymotion / VK (اختيار الجودات) ==============================
+QUALITY_SITES = ("dailymotion.com", "dai.ly", "vk.com", "vk.ru", "vkvideo.ru")
+
+
+def is_quality_site(url):
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower().split(":")[0]
+    except Exception:
+        return False
+    return any(host == d or host.endswith("." + d) for d in QUALITY_SITES)
+
+
+def quality_opts():
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+    }
+
+
+def fetch_info_q(url):
+    with yt_dlp.YoutubeDL(quality_opts()) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if info.get("entries"):
+        entries = [e for e in info["entries"] if e]
+        if not entries:
+            raise RuntimeError("مفيش فيديو في الرابط ده.")
+        info = entries[0]
+    return info
+
+
+def q_download_text(title, label, kind_ar, done, total, speed):
+    p = (done / total * 100) if total else 0
+    speed_txt = f"{human_size(speed)}/s" if speed else "..."
+    return (
+        header(title, label)
+        + f"📥 <b>جاري تحميل {kind_ar}...</b>\n\n"
+        + f"{green_bar(p)}  <b>{p:.1f}%</b>\n"
+        + f"📊 الحجم: {human_size(done)} / {human_size(total)}\n"
+        + f"🚀 السرعة: {speed_txt}"
+    )
+
+
+def q_upload_text(title, label, kind_ar, done, total, speed, eta):
+    p = (done / total * 100) if total else 0
+    speed_txt = f"{human_size(speed)}/s" if speed else "..."
+    eta_txt = human_time(eta) if eta is not None else "..."
+    return (
+        header(title, label)
+        + f"📤 <b>جاري رفع {kind_ar} إلى تيليجرام...</b>\n\n"
+        + f"{shade_bar(p)} <b>{p:.0f}%</b>\n"
+        + f"📦 {human_size(done)} / {human_size(total)}\n\n"
+        + f"🚀 السرعة: {speed_txt}\n"
+        + f"⏱️ المتبقي تقريباً: {eta_txt}"
+    )
+
+
+def fsize(f, duration):
+    size = f.get("filesize") or f.get("filesize_approx")
+    if size:
+        return int(size)
+    tbr = f.get("tbr")
+    if tbr and duration:
+        return int(tbr * 1000 / 8 * duration)
+    return None
+
+
+def build_options(info):
+    """بيطلّع قايمة الجودات (فيديو وصوت) مع الأحجام التقريبية."""
+    formats = info.get("formats") or []
+    duration = info.get("duration") or 0
+
+    audio_only = [f for f in formats if f.get("vcodec") == "none" and f.get("acodec") != "none"]
+    video_only = [
+        f for f in formats
+        if f.get("acodec") == "none" and f.get("vcodec") != "none" and f.get("height")
+    ]
+    combined = [
+        f for f in formats
+        if f.get("vcodec") != "none" and f.get("acodec") != "none" and f.get("height")
+    ]
+
+    # أحسن صوت للدمج مع الفيديو (m4a أفضل للدمج في mp4)
+    best_audio = None
+    if audio_only:
+        best_audio = max(
+            audio_only, key=lambda f: (f.get("ext") == "m4a", f.get("abr") or f.get("tbr") or 0)
+        )
+
+    # أحسن فورمات لكل جودة (بنفضّل H.264 / mp4 عشان يشتغل في تيليجرام)
+    by_q = {}
+    for f in video_only + combined:
+        w, h = f.get("width"), f.get("height")
+        q = min(w, h) if w and h else h
+        if not q or q > MAX_QUALITY:
+            continue
+        vc = f.get("vcodec") or ""
+        pref = (
+            1 if vc.startswith(("avc1", "h264")) else 0,
+            1 if f.get("ext") == "mp4" else 0,
+            f.get("tbr") or 0,
+        )
+        cur = by_q.get(q)
+        if cur is None or pref > cur[0]:
+            by_q[q] = (pref, f)
+
+    options = []
+    for q in sorted(by_q, reverse=True):
+        f = by_q[q][1]
+        size = fsize(f, duration)
+        if f.get("acodec") == "none" and best_audio:
+            fmt = f"{f['format_id']}+{best_audio['format_id']}"
+            a_size = fsize(best_audio, duration)
+            size = (size or 0) + (a_size or 0) or None
+        else:
+            fmt = f["format_id"]
+        options.append({"kind": "video", "label": f"{q}p", "fmt": fmt, "size": size})
+
+    # لو مفيش جودات واضحة (بعض المنصات) نعرض خيار واحد "الأفضل"
+    if not options and formats:
+        options.append({"kind": "video", "label": "الأفضل", "fmt": "bv*+ba/b", "size": info.get("filesize") or info.get("filesize_approx")})
+
+    # الصوت: أعلى جودة، وسط، أقل جودة (بحد أقصى 3)
+    by_abr = {}
+    for f in audio_only:
+        abr = f.get("abr") or f.get("tbr")
+        if not abr:
+            continue
+        key = round(abr)
+        size = fsize(f, duration)
+        cur = by_abr.get(key)
+        if cur is None or (size or 0) > (cur[1] or 0):
+            by_abr[key] = (f, size)
+    abrs = sorted(by_abr, reverse=True)
+    if len(abrs) > 3:
+        abrs = [abrs[0], abrs[len(abrs) // 2], abrs[-1]]
+    for key in abrs:
+        f, size = by_abr[key]
+        options.append(
+            {"kind": "audio", "label": f"{key} kbps", "fmt": f["format_id"], "size": size, "abr": key}
+        )
+    return options
+
+
+def download_one(url, opt, out_dir, hook):
+    opts = quality_opts()
+    opts.update(
+        {
+            "format": opt["fmt"],
+            "outtmpl": os.path.join(out_dir, "%(id)s.%(ext)s"),
+            "progress_hooks": [hook],
+            "concurrent_fragment_downloads": 4,
+        }
+    )
+    if opt["kind"] == "video":
+        opts["merge_output_format"] = "mp4"
+    else:
+        quality = str(min(max(int(opt.get("abr") or 192), 64), 320))
+        opts["postprocessors"] = [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": quality}
+        ]
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
+    files = [
+        os.path.join(out_dir, f)
+        for f in os.listdir(out_dir)
+        if not f.endswith((".part", ".ytdl", ".temp"))
+    ]
+    if not files:
+        raise RuntimeError("لم يتم العثور على الملف بعد التنزيل.")
+    return max(files, key=os.path.getsize)
+
+
+def list_text(job):
+    lines = [f"<b>{html.escape(job['title'])}</b>"]
+    if job.get("duration"):
+        lines.append(f"⏱️ {fmt_duration(job['duration'])}")
+    lines.append("")
+    lines.append("<b>الجودات والأحجام المتاحة:</b>")
+    for o in job["options"]:
+        icon = "🎬" if o["kind"] == "video" else "🎵"
+        if o["size"]:
+            size = ("≈ " if o["kind"] == "video" else "") + human_size(o["size"])
+        else:
+            size = "حجم غير معروف"
+        lines.append(f"{icon} {o['label']} — {size}")
+    lines.append("")
+    lines.append("<b>اضغط على الجودات لتحديدها (يمكنك اختيار أكثر من جودة)، ثم اضغط زر التحميل:</b>")
+    return "\n".join(lines)
+
+
+def build_kb(job_id, job):
+    rows, row = [], []
+    for i, o in enumerate(job["options"]):
+        icon = "🎬" if o["kind"] == "video" else "🎵"
+        mark = "✅" if i in job["selected"] else icon
+        row.append(InlineKeyboardButton(f"{mark} {o['label']}", callback_data=f"q:{job_id}:{i}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append(
+        [InlineKeyboardButton(f"⬇️ تحميل الجودات المحددة ({len(job['selected'])})", callback_data=f"go:{job_id}")]
+    )
+    rows.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"x:{job_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+
+async def handle_quality_link(message, url):
+    now = time.time()
+    for jid in [j for j, v in JOBS.items() if now - v.get("created", now) > JOB_TTL]:
+        JOBS.pop(jid, None)
+
+    status = await message.reply_text("⏳ <b>جارِ جلب الجودات المتاحة...</b>", quote=True)
+
+    try:
+        info = await asyncio.to_thread(fetch_info_q, url)
+        options = build_options(info)
+    except Exception as e:
+        err = html.escape(str(e))[:3000]
+        await status.edit_text(f"❌ <b>تعذّر قراءة الرابط:</b>\n<code>{err}</code>")
+        return
+
+    if not options:
+        await status.edit_text("❌ <b>ماقدرتش ألاقي جودات متاحة للرابط ده.</b>")
+        return
+
+    job_id = uuid.uuid4().hex[:10]
+    job = {
+        "url": url,
+        "title": info.get("title") or "video",
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "duration": info.get("duration"),
+        "options": options,
+        "selected": set(),
+        "user_id": message.from_user.id,
+        "cancel": False,
+        "started": False,
+        "created": now,
+    }
+    JOBS[job_id] = job
+    await status.edit_text(list_text(job), reply_markup=build_kb(job_id, job))
+
+
+@app.on_callback_query(filters.regex(r"^(q|go|x):"))
+async def on_quality_button(client, cq):
+    parts = cq.data.split(":")
+    action, job_id = parts[0], parts[1]
+    job = JOBS.get(job_id)
+
+    if not job:
+        await cq.answer("انتهت صلاحية الطلب، ابعت الرابط تاني.", show_alert=True)
+        return
+    if cq.from_user.id != job["user_id"]:
+        await cq.answer("ده مش طلبك.", show_alert=True)
+        return
+
+    if action == "q":
+        if job["started"]:
+            await cq.answer("التحميل بدأ بالفعل.")
+            return
+        idx = int(parts[2])
+        if idx in job["selected"]:
+            job["selected"].discard(idx)
+        else:
+            job["selected"].add(idx)
+        try:
+            await cq.message.edit_reply_markup(build_kb(job_id, job))
+        except Exception:
+            pass
+        await cq.answer()
+        return
+
+    if action == "x":
+        job["cancel"] = True
+        if not job["started"]:
+            JOBS.pop(job_id, None)
+            await safe_edit(cq.message, "❌ <b>تم الإلغاء.</b>")
+        await cq.answer("جارِ الإلغاء...")
+        return
+
+    # action == "go"
+    if job["started"]:
+        await cq.answer("التحميل بدأ بالفعل.")
+        return
+    if not job["selected"]:
+        await cq.answer("اختار جودة واحدة على الأقل.", show_alert=True)
+        return
+    job["started"] = True
+    await cq.answer()
+    asyncio.create_task(q_run_job(client, cq.message, job_id, job))
+
+
+async def q_process_one(client, msg, job, opt, idx, n, work_dir, loop, cancel_kb):
+    title = job["title"]
+    icon = "🎬" if opt["kind"] == "video" else "🎵"
+    label = f"{icon} {opt['label']}  ({idx}/{n})"
+    kind_ar = "فيديو" if opt["kind"] == "video" else "صوت"
+    os.makedirs(work_dir, exist_ok=True)
+
+    await safe_edit(msg, q_download_text(title, label, kind_ar, 0, opt["size"], None), cancel_kb)
+
+    state = {"last": 0, "files": {}}
+
+    def hook(d):
+        if job["cancel"]:
+            raise Cancelled()
+        state["files"][d.get("filename") or ""] = d.get("downloaded_bytes") or 0
+        if d.get("status") != "downloading":
+            return
+        now = time.time()
+        if now - state["last"] < UPDATE_EVERY:
+            return
+        state["last"] = now
+        done = sum(state["files"].values())
+        total = opt["size"] or d.get("total_bytes") or d.get("total_bytes_estimate")
+        if total and done > total:
+            done = total
+        text = q_download_text(title, label, kind_ar, done, total, d.get("speed"))
+        asyncio.run_coroutine_threadsafe(safe_edit(msg, text, cancel_kb), loop)
+
+    path = await asyncio.to_thread(download_one, job["url"], opt, work_dir, hook)
+    if job["cancel"]:
+        raise Cancelled()
+
+    real_size = os.path.getsize(path)
+    if real_size > MAX_FILE_SIZE:
+        return "too_big"
+
+    up = {"start": time.time(), "last": 0}
+
+    async def upload_progress(current, total):
+        if job["cancel"]:
+            client.stop_transmission()
+        now = time.time()
+        if now - up["last"] < UPDATE_EVERY and current < total:
+            return
+        up["last"] = now
+        elapsed = now - up["start"]
+        speed = current / elapsed if elapsed > 0 else 0
+        eta = (total - current) / speed if speed else None
+        await safe_edit(msg, q_upload_text(title, label, kind_ar, current, total, speed, eta), cancel_kb)
+
+    await safe_edit(msg, q_upload_text(title, label, kind_ar, 0, real_size, None, None), cancel_kb)
+
+    short = title[:150]
+    safe_name = re.sub(r'[\\/:*?"<>|]', "_", title[:100]).strip() or "video"
+    caption = f"<b>{html.escape(short)}</b>\n{icon} {html.escape(opt['label'])}"
+
+    if opt["kind"] == "audio":
+        duration, _, _ = await asyncio.to_thread(probe, path)
+        sent = await client.send_audio(
+            chat_id=msg.chat.id,
+            audio=path,
+            caption=caption,
+            title=short,
+            performer=job.get("uploader") or None,
+            duration=duration,
+            file_name=f"{safe_name}.mp3",
+            progress=upload_progress,
+        )
+    else:
+        duration, width, height = await asyncio.to_thread(probe, path)
+        thumb = await asyncio.to_thread(
+            make_thumb, path, duration, os.path.join(work_dir, "thumb.jpg")
+        )
+        if path.lower().endswith((".mp4", ".mov", ".m4v")):
+            sent = await client.send_video(
+                chat_id=msg.chat.id,
+                video=path,
+                caption=caption,
+                duration=duration,
+                width=width,
+                height=height,
+                thumb=thumb,
+                file_name=f"{safe_name}.mp4",
+                supports_streaming=True,
+                progress=upload_progress,
+            )
+        else:
+            sent = await client.send_document(
+                chat_id=msg.chat.id,
+                document=path,
+                caption=caption,
+                thumb=thumb,
+                progress=upload_progress,
+            )
+
+    if sent is None or job["cancel"]:
+        raise Cancelled()
+    return "ok"
+
+
+async def q_run_job(client, msg, job_id, job):
+    loop = asyncio.get_running_loop()
+    tmp_root = tempfile.mkdtemp(prefix="q_")
+    cancel_kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("❌ إلغاء التحميل", callback_data=f"x:{job_id}")]]
+    )
+    chosen = [job["options"][i] for i in sorted(job["selected"])]
+    n = len(chosen)
+    skipped, errors = [], []
+
+    try:
+        for idx, opt in enumerate(chosen, 1):
+            if job["cancel"]:
+                raise Cancelled()
+            work_dir = os.path.join(tmp_root, str(idx))
+            try:
+                if opt["size"] and opt["size"] > MAX_FILE_SIZE:
+                    skipped.append(opt["label"])
+                    continue
+                result = await q_process_one(client, msg, job, opt, idx, n, work_dir, loop, cancel_kb)
+                if result == "too_big":
+                    skipped.append(opt["label"])
+            except Cancelled:
+                raise
+            except Exception as e:
+                if job["cancel"]:
+                    raise Cancelled()
+                errors.append((opt["label"], str(e)))
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
+
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+        notes = []
+        if skipped:
+            notes.append("⚠️ الجودات دي أكبر من 2 جيجا واتخطّيتها: " + "، ".join(skipped))
+        for label, err in errors:
+            notes.append(f"❌ فشل تحميل {label}:\n<code>{html.escape(err)[:500]}</code>")
+        if notes:
+            await client.send_message(msg.chat.id, "\n\n".join(notes))
+
+    except Cancelled:
+        await safe_edit(msg, "❌ <b>تم الإلغاء.</b>")
+    except Exception as e:
+        err = html.escape(str(e))[:3000]
+        await safe_edit(msg, f"❌ <b>حدث خطأ أثناء المعالجة:</b>\n<code>{err}</code>")
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+        JOBS.pop(job_id, None)
+
+
 # ============================== الهاندلرز ==============================
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     name = html.escape(message.from_user.first_name or "")
     await message.reply_text(
         f"أهلاً بيك يا {name} في بوت التحميلات 🎬⚡\n"
-        "ابعت لي رابط الفيديو (أقل من 2 جيجا) وهحمله وأرفعه لك."
+        "ابعت لي رابط الفيديو (أقل من 2 جيجا) وهحمله وأرفعه لك.\n"
+        "ولو الرابط من Dailymotion أو VK Video هعرض لك الجودات المتاحة تختار منها."
     )
 
 
@@ -349,6 +814,11 @@ async def on_link(client, message):
     url = message.text.strip()
     if not url.lower().startswith(("http://", "https://")):
         await message.reply_text("⚠️ من فضلك ابعت رابط صحيح يبدأ بـ http أو https.")
+        return
+
+    # روابط Dailymotion و VK بتعرض قايمة جودات تختار منها
+    if is_quality_site(url):
+        await handle_quality_link(message, url)
         return
 
     status = await message.reply_text("⏳ <b>جارِ التحقق من الرابط...</b>", quote=True)
