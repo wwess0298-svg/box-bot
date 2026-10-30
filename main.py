@@ -9,6 +9,7 @@ import asyncio
 import tempfile
 import subprocess
 import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -88,9 +89,9 @@ def green_bar(p, n=10):
     return "🟩" * filled + "⬜" * (n - filled)
 
 
-def shade_bar(p, n=10):
+def shade_bar(p, n=20):
     filled = max(0, min(n, int(p / 100 * n)))
-    return "[" + "▓" * filled + "░" * (n - filled) + "]"
+    return "[" + "█" * filled + "░" * (n - filled) + "]"
 
 
 def header(title, label=None):
@@ -126,9 +127,73 @@ def upload_text(title, done, total, speed, eta):
     )
 
 
+# ============================== أزرار ملونة (Bot API 9.4) ==============================
+# style: "success" = أخضر ، "danger" = أحمر ، "primary" = أزرق ، None = عادي
+def btn(text, data, style=None):
+    b = {"text": text, "callback_data": data}
+    if style:
+        b["style"] = style
+    return b
+
+
+def plain_markup(rows):
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(b["text"], callback_data=b["callback_data"]) for b in row] for row in rows]
+    )
+
+
+def tg_api(method, payload):
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+async def edit_with_buttons(msg, text, rows=None):
+    """بيعدّل الرسالة بأزرار ملونة، ولو فشل بيرجع للأزرار العادية."""
+    payload = {
+        "chat_id": msg.chat.id,
+        "message_id": msg.id,
+        "text": text,
+        "parse_mode": "HTML",
+        "link_preview_options": {"is_disabled": True},
+    }
+    if rows:
+        payload["reply_markup"] = {"inline_keyboard": rows}
+    try:
+        await asyncio.to_thread(tg_api, "editMessageText", payload)
+        return
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "ignore")
+        except Exception:
+            pass
+        if "not modified" in body or e.code == 429:
+            return  # مفيش تغيير أو ضغط مؤقت، عادي
+    except Exception:
+        pass
+    await msg.edit_text(text, reply_markup=plain_markup(rows) if rows else None)
+
+
+async def edit_markup(msg, rows):
+    payload = {
+        "chat_id": msg.chat.id,
+        "message_id": msg.id,
+        "reply_markup": {"inline_keyboard": rows},
+    }
+    try:
+        await asyncio.to_thread(tg_api, "editMessageReplyMarkup", payload)
+    except Exception:
+        await msg.edit_reply_markup(plain_markup(rows))
+
+
 async def safe_edit(msg, text, kb=None):
     try:
-        await msg.edit_text(text, reply_markup=kb)
+        await edit_with_buttons(msg, text, kb)
     except Exception:
         pass
 
@@ -544,18 +609,17 @@ def build_kb(job_id, job):
     rows, row = [], []
     for i, o in enumerate(job["options"]):
         icon = "🎬" if o["kind"] == "video" else "🎵"
-        mark = "✅" if i in job["selected"] else icon
-        row.append(InlineKeyboardButton(f"{mark} {o['label']}", callback_data=f"q:{job_id}:{i}"))
+        chosen = i in job["selected"]
+        mark = "✅" if chosen else icon
+        row.append(btn(f"{mark} {o['label']}", f"q:{job_id}:{i}", "success" if chosen else None))
         if len(row) == 3:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
-    rows.append(
-        [InlineKeyboardButton(f"⬇️ تحميل الجودات المحددة ({len(job['selected'])})", callback_data=f"go:{job_id}")]
-    )
-    rows.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"x:{job_id}")])
-    return InlineKeyboardMarkup(rows)
+    rows.append([btn(f"⬇️ تحميل الجودات المحددة ({len(job['selected'])})", f"go:{job_id}", "success")])
+    rows.append([btn("❌ إلغاء", f"x:{job_id}", "danger")])
+    return rows
 
 
 
@@ -592,7 +656,7 @@ async def handle_quality_link(message, url):
         "created": now,
     }
     JOBS[job_id] = job
-    await status.edit_text(list_text(job), reply_markup=build_kb(job_id, job))
+    await edit_with_buttons(status, list_text(job), build_kb(job_id, job))
 
 
 @app.on_callback_query(filters.regex(r"^(q|go|x):"))
@@ -618,7 +682,7 @@ async def on_quality_button(client, cq):
         else:
             job["selected"].add(idx)
         try:
-            await cq.message.edit_reply_markup(build_kb(job_id, job))
+            await edit_markup(cq.message, build_kb(job_id, job))
         except Exception:
             pass
         await cq.answer()
@@ -747,9 +811,7 @@ async def q_process_one(client, msg, job, opt, idx, n, work_dir, loop, cancel_kb
 async def q_run_job(client, msg, job_id, job):
     loop = asyncio.get_running_loop()
     tmp_root = tempfile.mkdtemp(prefix="q_")
-    cancel_kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("❌ إلغاء التحميل", callback_data=f"x:{job_id}")]]
-    )
+    cancel_kb = [[btn("❌ إلغاء التحميل", f"x:{job_id}", "danger")]]
     chosen = [job["options"][i] for i in sorted(job["selected"])]
     n = len(chosen)
     skipped, errors = [], []
@@ -849,17 +911,16 @@ async def on_link(client, message):
         "direct": info.get("direct", False),
     }
 
-    kb = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(f"⬇️ 🎬 فيديو — {human_size(size)}", callback_data=f"dl:{job_id}")],
-            [InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{job_id}")],
-        ]
-    )
-    await status.edit_text(
+    kb = [
+        [btn(f"⬇️ 🎬 فيديو — {human_size(size)}", f"dl:{job_id}", "success")],
+        [btn("❌ إلغاء", f"cancel:{job_id}", "danger")],
+    ]
+    await edit_with_buttons(
+        status,
         f"<b>{html.escape(info['title'])}</b>\n\n"
         f"<b>الحجم:</b> {human_size(size)}\n"
         "<b>اختر لبدء التنزيل:</b>",
-        reply_markup=kb,
+        kb,
     )
 
 
@@ -896,9 +957,7 @@ async def run_job(client, msg, job_id, job):
     loop = asyncio.get_running_loop()
     tmp_dir = tempfile.mkdtemp(prefix="dl_")
     title = job["title"]
-    cancel_kb = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("❌ إلغاء التحميل", callback_data=f"cancel:{job_id}")]]
-    )
+    cancel_kb = [[btn("❌ إلغاء التحميل", f"cancel:{job_id}", "danger")]]
 
     try:
         await safe_edit(msg, download_text(title, 0, job["size"], None), cancel_kb)
