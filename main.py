@@ -89,7 +89,7 @@ def green_bar(p, n=10):
     return "🟩" * filled + "⬜" * (n - filled)
 
 
-def shade_bar(p, n=20):
+def shade_bar(p, n=15):  # طول شريط الرفع (قلّله لو النسبة نزلت سطر جديد)
     filled = max(0, min(n, int(p / 100 * n)))
     return "[" + "█" * filled + "░" * (n - filled) + "]"
 
@@ -127,7 +127,7 @@ def upload_text(title, done, total, speed, eta):
     )
 
 
-# ============================ أزرار ملونة (Bot API 9.4) ============================
+# ============================== أزرار ملونة (Bot API 9.4) ==============================
 # style: "success" = أخضر ، "danger" = أحمر ، "primary" = أزرق ، None = عادي
 def btn(text, data, style=None):
     b = {"text": text, "callback_data": data}
