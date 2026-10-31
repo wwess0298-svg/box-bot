@@ -59,9 +59,25 @@ POS_ARROWS = {
     "bl": "↙️", "bc": "⬇️", "br": "↘️",
 }
 POS_GRID = [["tl", "tc", "tr"], ["ml", "mc", "mr"], ["bl", "bc", "br"]]
-SIZES = [5, 8, 10, 15, 20, 25, 30]
-OPACITIES = [100, 80, 60, 40, 20]
-MARGINS = [0, 1, 2, 3, 5, 8]
+SIZES = [5, 8, 10, 12, 15, 17, 20, 22, 25, 27, 30, 35, 40, 45, 50]
+OPACITIES = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10]
+MARGINS = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20]
+# الإعدادات اللي بتفتح قايمة اختيارات: (المفتاح ، الاسم ، القيم ، عدد الأزرار في الصف)
+FIELDS = [
+    ("pos", "📍 الموضع"),
+    ("opacity", "💧 الشفافية"),
+    ("margin", "⬜ الهامش"),
+    ("size", "📐 الحجم"),
+    ("speed", "🚀 نمط المعالجة"),
+]
+OPTIONS = {"size": (SIZES, 5), "opacity": (OPACITIES, 5), "margin": (MARGINS, 4)}
+PICKER_TEXT = {
+    "pos": "📍 <b>حدّد مكان العلامة على الفيديو:</b>",
+    "opacity": "💧 <b>اختار الشفافية (100% = واضحة تماماً):</b>",
+    "margin": "⬜ <b>اختار الهامش (المسافة بين العلامة وحافة الفيديو):</b>",
+    "size": "📐 <b>اختار حجم العلامة (نسبة من عرض الفيديو):</b>",
+    "speed": "🚀 <b>اختار نمط المعالجة:</b>",
+}
 # الاسم ، preset ، crf ، أقصى ارتفاع (None = زي الأصل)
 SPEEDS = {
     "turbo": ("⚡ سريع جداً (720p)", "ultrafast", 29, 720),
@@ -257,13 +273,6 @@ def active_wm(uid, u):
     return p if os.path.exists(p) else None
 
 
-def cycle(values, current):
-    try:
-        return values[(values.index(current) + 1) % len(values)]
-    except ValueError:
-        return values[0]
-
-
 # ============================== علامة نصية (Pillow) ==============================
 def find_font(text):
     arabic = any("\u0600" <= c <= "\u06FF" for c in text)
@@ -454,22 +463,50 @@ def panel_text(uid, u):
 def panel_rows(u):
     return [
         [btn("📝 علامة نصية", "s:text", "primary"), btn("🖼️ رفع الشعار", "s:logo", "primary")],
-        [btn(f"📐 الحجم: {u['size']}%", "s:size", "primary"), btn(f"🌗 الشفافية: {u['opacity']}%", "s:opacity", "primary")],
-        [btn(f"📍 الموضع: {POS_NAMES[u['pos']]}", "s:pos", "primary"), btn(f"↔️ الهامش: {u['margin']}%", "s:margin", "primary")],
-        [btn(f"🚀 نمط المعالجة: {SPEEDS.get(u['speed'], SPEEDS['turbo'])[0]}", "s:speed", "primary")],
+        [btn(f"📐 الحجم: {u['size']}%", "s:open:size", "primary"), btn(f"🌗 الشفافية: {u['opacity']}%", "s:open:opacity", "primary")],
+        [btn(f"📍 الموضع: {POS_NAMES[u['pos']]}", "s:open:pos", "primary"), btn(f"↔️ الهامش: {u['margin']}%", "s:open:margin", "primary")],
+        [btn(f"🚀 نمط المعالجة: {SPEEDS.get(u['speed'], SPEEDS['turbo'])[0]}", "s:open:speed", "primary")],
         [btn("👁️ معاينة العلامة المائية", "s:preview", "success")],
     ]
 
 
-def pos_rows(u):
-    rows = []
-    for line in POS_GRID:
-        rows.append([
-            btn(("✅ " if k == u["pos"] else "") + f"{POS_ARROWS[k]} {POS_NAMES[k]}", f"s:pos:{k}", "success" if k == u["pos"] else "primary")
-            for k in line
-        ])
-    rows.append([btn("🔙 رجوع", "s:back", "danger")])
+def picker_rows(u, field):
+    """قايمة الإعدادات (الحالي متعلّم ✓) وتحتها الاختيارات المتاحة."""
+    rows = [
+        [btn(label + (" ✓" if f == field else ""), f"s:open:{f}", "success" if f == field else "primary")]
+        for f, label in FIELDS
+    ]
+    if field == "pos":
+        for line in POS_GRID:
+            rows.append([
+                btn(
+                    ("✅ " if k == u["pos"] else "") + POS_ARROWS[k],
+                    f"s:set:pos:{k}",
+                    "success" if k == u["pos"] else None,
+                )
+                for k in line
+            ])
+    elif field == "speed":
+        for k, (name, _, _, _) in SPEEDS.items():
+            cur = k == u["speed"]
+            rows.append([btn(("✅ " if cur else "") + name, f"s:set:speed:{k}", "success" if cur else None)])
+    else:
+        values, per_row = OPTIONS[field]
+        row = []
+        for v in values:
+            cur = v == u[field]
+            row.append(btn(("✅ " if cur else "") + f"{v}%", f"s:set:{field}:{v}", "success" if cur else None))
+            if len(row) == per_row:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+    rows.append([btn("👁️ معاينة", "s:preview", "success"), btn("🔙 رجوع", "s:back", "danger")])
     return rows
+
+
+async def show_picker(msg, u, field):
+    await edit_with_buttons(msg, PICKER_TEXT[field], picker_rows(u, field))
 
 
 async def send_panel(message):
@@ -491,25 +528,26 @@ async def on_settings(client, cq):
     parts = cq.data.split(":")
     action = parts[1]
     msg = cq.message
+    valid_fields = [f for f, _ in FIELDS]
 
-    if action == "size":
-        u["size"] = cycle(SIZES, u["size"])
-    elif action == "opacity":
-        u["opacity"] = cycle(OPACITIES, u["opacity"])
-    elif action == "margin":
-        u["margin"] = cycle(MARGINS, u["margin"])
-    elif action == "speed":
-        keys = list(SPEEDS)
-        u["speed"] = keys[(keys.index(u["speed"]) + 1) % len(keys)] if u["speed"] in keys else keys[0]
-    elif action == "pos":
-        if len(parts) == 3 and parts[2] in POS_NAMES:
-            u["pos"] = parts[2]
-            save_settings()
-            await edit_with_buttons(msg, panel_text(uid, u), panel_rows(u))
-            await cq.answer("تم")
-            return
-        await edit_with_buttons(msg, "📍 <b>اختار موضع العلامة:</b>", pos_rows(u))
+    if action == "open" and len(parts) == 3 and parts[2] in valid_fields:
+        await show_picker(msg, u, parts[2])
         await cq.answer()
+        return
+    if action == "set" and len(parts) == 4 and parts[2] in valid_fields:
+        field, raw = parts[2], parts[3]
+        if field == "pos" and raw in POS_NAMES:
+            u["pos"] = raw
+        elif field == "speed" and raw in SPEEDS:
+            u["speed"] = raw
+        elif field in OPTIONS and raw.isdigit() and int(raw) in OPTIONS[field][0]:
+            u[field] = int(raw)
+        else:
+            await cq.answer("اختيار غير صالح.", show_alert=True)
+            return
+        save_settings()
+        await show_picker(msg, u, field)
+        await cq.answer("تم ✅")
         return
     elif action == "back":
         await edit_with_buttons(msg, panel_text(uid, u), panel_rows(u))
