@@ -127,7 +127,7 @@ def upload_text(title, done, total, speed, eta):
     )
 
 
-# ============================== أزرار ملونة (Bot API 9.4) ==============================
+# ============================ أزرار ملونة (Bot API 9.4) ============================
 # style: "success" = أخضر ، "danger" = أحمر ، "primary" = أزرق ، None = عادي
 def btn(text, data, style=None):
     b = {"text": text, "callback_data": data}
