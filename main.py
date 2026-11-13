@@ -5,6 +5,7 @@ import time
 import uuid
 import html
 import shutil
+import struct
 import asyncio
 import tempfile
 import subprocess
@@ -326,7 +327,7 @@ def direct_download(url, tmp_dir, title, referer=None):
     if shutil.which("aria2c"):
         r = subprocess.run(
             [
-                "aria2c", "-x16", "-s16", "-k1M", "--file-allocation=none",
+                "aria2c", "-x16", "-s16", "-k1M", "--file-allocation=none", "--auto-save-interval=1",
                 "--max-tries=3", "--check-certificate=false",
                 f"--user-agent={BROWSER_UA}",
                 *([f"--referer={referer}"] if referer else []),
@@ -360,7 +361,7 @@ def download(url, tmp_dir, hook, direct=False, title="video.mp4", referer=None):
     if shutil.which("aria2c"):
         opts["external_downloader"] = {"default": "aria2c"}
         opts["external_downloader_args"] = {
-            "aria2c": ["-x16", "-s16", "-k1M", "--file-allocation=none"]
+            "aria2c": ["-x16", "-s16", "-k1M", "--file-allocation=none", "--auto-save-interval=1"]
         }
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
@@ -391,6 +392,49 @@ def kill_by_path(path):
         pass
 
 
+def aria_progress(ctl_path):
+    """بيقرا ملف المتابعة بتاع aria2 (.aria2) ويرجّع الحجم اللي اتحمّل فعلاً، أو None لو مقدرش."""
+    try:
+        with open(ctl_path, "rb") as f:
+            data = f.read()
+        pos = 6  # النسخة + الامتداد
+        (hlen,) = struct.unpack(">I", data[pos:pos + 4])
+        pos += 4 + hlen
+        (plen,) = struct.unpack(">I", data[pos:pos + 4])
+        pos += 4
+        (total,) = struct.unpack(">Q", data[pos:pos + 8])
+        pos += 16  # الحجم الكلي + حجم الرفع
+        (blen,) = struct.unpack(">I", data[pos:pos + 4])
+        pos += 4
+        bitfield = data[pos:pos + blen]
+        pos += blen
+        if plen <= 0 or total <= 0:
+            return None
+        pieces = (total + plen - 1) // plen
+        if blen != (pieces + 7) // 8 or len(bitfield) != blen:
+            return None
+        done = 0
+        for i in range(pieces):
+            if bitfield[i >> 3] & (0x80 >> (i & 7)):
+                done += plen if i < pieces - 1 else total - plen * (pieces - 1)
+        # القطع اللي لسه بتتحمّل (بتتحسب بالبلوكات 16 كيلو)
+        try:
+            (n,) = struct.unpack(">I", data[pos:pos + 4])
+            pos += 4
+            for _ in range(n):
+                _idx, length, bl = struct.unpack(">III", data[pos:pos + 12])
+                pos += 12
+                bits = data[pos:pos + bl]
+                pos += bl
+                blocks = sum(bin(b).count("1") for b in bits)
+                done += min(blocks * 16384, length)
+        except Exception:
+            pass
+        return min(done, total)
+    except Exception:
+        return None
+
+
 def dir_bytes(tmp_dir):
     """حجم اللي اتنزّل فعلاً (بيتجاهل المساحات الفاضية) عشان شريط التقدم."""
     total = 0
@@ -398,9 +442,15 @@ def dir_bytes(tmp_dir):
         for f in os.listdir(tmp_dir):
             if f.endswith(".aria2"):
                 continue
-            st = os.stat(os.path.join(tmp_dir, f))
+            path = os.path.join(tmp_dir, f)
+            st = os.stat(path)
             blocks = getattr(st, "st_blocks", 0)  # مش موجودة على ويندوز
-            total += blocks * 512 if blocks else st.st_size
+            if blocks:
+                total += blocks * 512
+                continue
+            # ويندوز: الحجم الظاهري مش دقيق مع aria2، فنقرا ملف المتابعة بتاعه
+            real = aria_progress(path + ".aria2")
+            total += real if real is not None else st.st_size
     except Exception:
         pass
     return total
