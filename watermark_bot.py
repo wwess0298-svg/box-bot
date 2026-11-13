@@ -276,11 +276,12 @@ def active_wm(uid, u):
 # ============================== علامة نصية (Pillow) ==============================
 def find_font(text):
     arabic = any("\u0600" <= c <= "\u06FF" for c in text)
-    dirs = ["/system/fonts", "/system/font", "/usr/share/fonts", os.path.expandvars("$PREFIX/share/fonts")]
+    dirs = ["/system/fonts", "/system/font", "/usr/share/fonts", os.path.expandvars("$PREFIX/share/fonts"),
+            os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")]
     names = (
         ["NotoNaskhArabic-Regular.ttf", "NotoSansArabic-Regular.ttf", "NotoSansArabicUI-Regular.ttf",
-         "DroidSansArabic.ttf", "NotoKufiArabic-Regular.ttf"]
-        if arabic else ["Roboto-Regular.ttf", "DroidSans.ttf", "NotoSans-Regular.ttf", "DejaVuSans.ttf"]
+         "DroidSansArabic.ttf", "NotoKufiArabic-Regular.ttf", "tahoma.ttf", "arial.ttf", "segoeui.ttf"]
+        if arabic else ["Roboto-Regular.ttf", "DroidSans.ttf", "NotoSans-Regular.ttf", "DejaVuSans.ttf", "arial.ttf", "segoeui.ttf"]
     )
     for d in dirs:
         for n in names:
