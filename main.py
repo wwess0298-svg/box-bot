@@ -32,6 +32,11 @@ BROWSER_UA = (
     "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
 )
 SSL_CTX = ssl._create_unverified_context()  # بعض المواقع شهادتها ناقصة
+# مواقع الرابط المباشر بتاعها بيرجّع 403 من غير Referer معين (الاختبار بتاعك: 403 -> 206).
+# لو لقيت موقع تاني بيدّي 403، ضيف سطر جديد هنا: "دومين_الرابط": "صفحة_التحميل"
+KNOWN_REFERERS = {
+    "cdn-video.xyz": "https://down.vidtube.one/",
+}
 MAX_QUALITY = 1080   # أعلى جودة بتظهر في قايمة Dailymotion / VK
 JOB_TTL = 6 * 3600   # طلبات الجودات اللي ماتكمّلتش بتتمسح بعد 6 ساعات
 
@@ -248,11 +253,23 @@ def fetch_info_ytdlp(url):
         return {"title": title, "size": size, "direct": False}
 
 
-def direct_info(url):
+def known_referer(url):
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower().split(":")[0]
+    except Exception:
+        return None
+    for suffix, ref in KNOWN_REFERERS.items():
+        if host == suffix or host.endswith("." + suffix):
+            return ref
+    return None
+
+
+def direct_info(url, referer=None):
     """للروابط المباشرة اللي yt-dlp مش بيعرف يقراها (SSL ناقص / 403)."""
-    req = urllib.request.Request(
-        url, headers={"User-Agent": BROWSER_UA, "Range": "bytes=0-0"}
-    )
+    headers = {"User-Agent": BROWSER_UA, "Range": "bytes=0-0"}
+    if referer:
+        headers["Referer"] = referer
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=20, context=SSL_CTX) as r:
         ctype = (r.headers.get("Content-Type") or "").lower()
         if "text/html" in ctype:
@@ -274,23 +291,35 @@ def direct_info(url):
         name = name or "video"
         if not os.path.splitext(name)[1]:
             name += ".mp4"
-        return {"title": name, "size": size, "direct": True}
+        return {"title": name, "size": size, "direct": True, "referer": referer}
 
 
 def fetch_info(url):
-    try:
-        return fetch_info_ytdlp(url)
-    except Exception as first_error:
+    # موقع معروف إنه بيحتاج Referer: نجرّبه الأول على طول
+    ref = known_referer(url)
+    if ref:
         try:
-            info = direct_info(url)
+            info = direct_info(url, ref)
         except Exception:
             info = None
         if info:
             return info
+    try:
+        return fetch_info_ytdlp(url)
+    except Exception as first_error:
+        # آخر محاولة: من غير Referer، وبعدين بكل Referer معروف
+        tries = [None] + [r for r in dict.fromkeys(KNOWN_REFERERS.values()) if r != ref]
+        for r in tries:
+            try:
+                info = direct_info(url, r)
+            except Exception:
+                info = None
+            if info:
+                return info
         raise first_error
 
 
-def direct_download(url, tmp_dir, title):
+def direct_download(url, tmp_dir, title, referer=None):
     ext = os.path.splitext(title)[1] or ".mp4"
     name = "video" + ext
     path = os.path.join(tmp_dir, name)
@@ -300,6 +329,7 @@ def direct_download(url, tmp_dir, title):
                 "aria2c", "-x16", "-s16", "-k1M", "--file-allocation=none",
                 "--max-tries=3", "--check-certificate=false",
                 f"--user-agent={BROWSER_UA}",
+                *([f"--referer={referer}"] if referer else []),
                 "--console-log-level=error", "--summary-interval=0",
                 "--download-result=hide",
                 "-d", tmp_dir, "-o", name, url,
@@ -309,15 +339,18 @@ def direct_download(url, tmp_dir, title):
         if r.returncode != 0 or not os.path.exists(path):
             raise RuntimeError("aria2c: " + (r.stderr or r.stdout or "failed")[-300:])
         return path
-    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA})
+    headers = {"User-Agent": BROWSER_UA}
+    if referer:
+        headers["Referer"] = referer
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r, open(path, "wb") as f:
         shutil.copyfileobj(r, f, 1024 * 1024)
     return path
 
 
-def download(url, tmp_dir, hook, direct=False, title="video.mp4"):
+def download(url, tmp_dir, hook, direct=False, title="video.mp4", referer=None):
     if direct:
-        return direct_download(url, tmp_dir, title)
+        return direct_download(url, tmp_dir, title, referer)
     opts = ytdlp_base_opts()
     opts.update({
         "format": FORMAT,
@@ -341,6 +374,23 @@ def download(url, tmp_dir, hook, direct=False, title="video.mp4"):
     return max(files, key=os.path.getsize)
 
 
+def kill_by_path(path):
+    """بيوقف أي برنامج (زي aria2c) شغال على المجلد ده. بيشتغل على أندرويد/لينكس وويندوز."""
+    try:
+        if os.name == "nt":
+            safe = path.replace("'", "''")
+            ps = (
+                "Get-CimInstance Win32_Process | Where-Object { "
+                f"$_.CommandLine -like '*{safe}*' -and $_.ProcessId -ne $PID }} | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+            )
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, timeout=30)
+        else:
+            subprocess.run(["pkill", "-f", path], capture_output=True)
+    except Exception:
+        pass
+
+
 def dir_bytes(tmp_dir):
     """حجم اللي اتنزّل فعلاً (بيتجاهل المساحات الفاضية) عشان شريط التقدم."""
     total = 0
@@ -349,7 +399,8 @@ def dir_bytes(tmp_dir):
             if f.endswith(".aria2"):
                 continue
             st = os.stat(os.path.join(tmp_dir, f))
-            total += st.st_blocks * 512 if st.st_blocks else st.st_size
+            blocks = getattr(st, "st_blocks", 0)  # مش موجودة على ويندوز
+            total += blocks * 512 if blocks else st.st_size
     except Exception:
         pass
     return total
@@ -362,7 +413,7 @@ async def monitor_download(msg, job, tmp_dir, kb):
     while True:
         await asyncio.sleep(UPDATE_EVERY)
         if job["cancel"]:
-            subprocess.run(["pkill", "-f", tmp_dir], capture_output=True)
+            kill_by_path(tmp_dir)
             return
         done = dir_bytes(tmp_dir)
         now = time.time()
@@ -909,6 +960,7 @@ async def on_link(client, message):
         "cancel": False,
         "started": False,
         "direct": info.get("direct", False),
+        "referer": info.get("referer"),
     }
 
     kb = [
@@ -982,7 +1034,7 @@ async def run_job(client, msg, job_id, job):
         monitor = asyncio.create_task(monitor_download(msg, job, tmp_dir, cancel_kb))
         try:
             path = await asyncio.to_thread(
-                download, job["url"], tmp_dir, hook, job["direct"], title
+                download, job["url"], tmp_dir, hook, job["direct"], title, job.get("referer")
             )
         finally:
             monitor.cancel()
