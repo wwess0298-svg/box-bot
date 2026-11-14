@@ -327,7 +327,7 @@ def direct_download(url, tmp_dir, title, referer=None):
     if shutil.which("aria2c"):
         r = subprocess.run(
             [
-                "aria2c", "-x16", "-s16", "-k1M", "--file-allocation=none", "--auto-save-interval=1",
+                "aria2c", "-x16", "-s16", "-k1M", "--file-allocation=none", "--auto-save-interval=1", "--disable-ipv6=true",
                 "--max-tries=3", "--check-certificate=false",
                 f"--user-agent={BROWSER_UA}",
                 *([f"--referer={referer}"] if referer else []),
@@ -361,7 +361,7 @@ def download(url, tmp_dir, hook, direct=False, title="video.mp4", referer=None):
     if shutil.which("aria2c"):
         opts["external_downloader"] = {"default": "aria2c"}
         opts["external_downloader_args"] = {
-            "aria2c": ["-x16", "-s16", "-k1M", "--file-allocation=none", "--auto-save-interval=1"]
+            "aria2c": ["-x16", "-s16", "-k1M", "--file-allocation=none", "--auto-save-interval=1", "--disable-ipv6=true"]
         }
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
