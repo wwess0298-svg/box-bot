@@ -100,6 +100,40 @@ def shade_bar(p, n=15):  # طول شريط الرفع (قلّله لو النس�
     return "[" + "█" * filled + "░" * (n - filled) + "]"
 
 
+# ---------- أشرطة التقدم ----------
+UPLOAD_BAR_STYLE = "boxes"   # شكل شريط الرفع. الاختيارات: "glow" أو "boxes" أو "battery"
+
+
+def ltr(text):
+    """بيمنع تلخبط ترتيب الأرقام والوحدات (MB / KB) وسط الكلام العربي."""
+    return "\u200e" + text
+
+
+def _cells(p, n):
+    return max(0, min(n, int(p / 100 * n)))
+
+
+def rocket_bar(p, n=10):
+    """شريط التحميل: مربعات زرقاء والصاروخ على راس التقدم."""
+    head = min(_cells(p, n), n - 1)
+    return "🟦" * head + "🚀" + "⬛" * (n - head - 1)
+
+
+def upload_bar(p):
+    """شريط الرفع (بيتغيّر من UPLOAD_BAR_STYLE فوق)."""
+    if UPLOAD_BAR_STYLE == "boxes":
+        n = 10
+        head = min(_cells(p, n), n - 1)
+        return "🟧" * head + "📦" + "⬛" * (n - head - 1)
+    if UPLOAD_BAR_STYLE == "battery":
+        n = 10
+        f = _cells(p, n)
+        return ("🪫" if p < 15 else "🔋") + "🟩" * f + "⬛" * (n - f)
+    n = 12
+    f = _cells(p, n)
+    return "▰" * f + "▱" * (n - f)
+
+
 def header(title, label=None):
     text = f"<b>{html.escape(title)}</b>\n"
     if label:
@@ -112,10 +146,11 @@ def download_text(title, done, total, speed):
     speed_txt = f"{human_size(speed)}/s" if speed else "..."
     return (
         header(title)
-        + "📥 <b>جاري تحميل فيديو...</b>\n\n"
-        + f"{green_bar(p)}  <b>{p:.1f}%</b>\n"
-        + f"📊 الحجم: {human_size(done)} / {human_size(total)}\n"
-        + f"🚀 السرعة: {speed_txt}"
+        + "📥 <b>جاري تحميل فيديو...</b>\n"
+        + "🚀 <i>نمط الصاروخ</i>\n\n"
+        + f"{rocket_bar(p)}  <b>{p:.1f}%</b>\n"
+        + f"📊 الحجم: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
+        + f"🚀 السرعة: {ltr(speed_txt)}"
     )
 
 
@@ -126,10 +161,10 @@ def upload_text(title, done, total, speed, eta):
     return (
         header(title)
         + "📤 <b>جاري رفع فيديو إلى تيليجرام...</b>\n\n"
-        + f"{shade_bar(p)} <b>{p:.0f}%</b>\n"
-        + f"📦 {human_size(done)} / {human_size(total)}\n\n"
-        + f"🚀 السرعة: {speed_txt}\n"
-        + f"⏱️ المتبقي تقريباً: {eta_txt}"
+        + f"{upload_bar(p)}  <b>{p:.0f}%</b>\n"
+        + f"💾 المرفوع: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
+        + f"🚀 السرعة: {ltr(speed_txt)}\n"
+        + f"⏳ المتبقي: {eta_txt}"
     )
 
 
@@ -239,6 +274,17 @@ def ytdlp_base_opts():
     }
 
 
+def quality_text(info, title):
+    """بيطلّع نص زي "720p MP4" من اللي معروف عن الفيديو."""
+    ext = (info.get("ext") or os.path.splitext(title)[1].lstrip(".") or "").upper()
+    h = info.get("height")
+    if not h:  # لو مش معروف، نحاول نلاقيه في اسم الملف (زي 1080p)
+        m = re.search(r"(?<!\d)(2160|1440|1080|720|576|480|360|240|144)[pP]", title)
+        h = int(m.group(1)) if m else None
+    parts = ([f"{h}p"] if h else []) + ([ext] if ext else [])
+    return " ".join(parts) or "غير معروف"
+
+
 def fetch_info_ytdlp(url):
     opts = ytdlp_base_opts()
     opts["format"] = FORMAT
@@ -251,7 +297,9 @@ def fetch_info_ytdlp(url):
         if not title.lower().endswith("." + ext.lower()):
             title = f"{title}.{ext}"
         size = info.get("filesize") or info.get("filesize_approx") or probe_size(info)
-        return {"title": title, "size": size, "direct": False}
+        w, h = info.get("width"), info.get("height")
+        height = min(w, h) if w and h else h
+        return {"title": title, "size": size, "direct": False, "ext": ext, "height": height}
 
 
 def known_referer(url):
@@ -551,10 +599,11 @@ def q_download_text(title, label, kind_ar, done, total, speed):
     speed_txt = f"{human_size(speed)}/s" if speed else "..."
     return (
         header(title, label)
-        + f"📥 <b>جاري تحميل {kind_ar}...</b>\n\n"
-        + f"{green_bar(p)}  <b>{p:.1f}%</b>\n"
-        + f"📊 الحجم: {human_size(done)} / {human_size(total)}\n"
-        + f"🚀 السرعة: {speed_txt}"
+        + f"📥 <b>جاري تحميل {kind_ar}...</b>\n"
+        + "🚀 <i>نمط الصاروخ</i>\n\n"
+        + f"{rocket_bar(p)}  <b>{p:.1f}%</b>\n"
+        + f"📊 الحجم: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
+        + f"🚀 السرعة: {ltr(speed_txt)}"
     )
 
 
@@ -565,10 +614,10 @@ def q_upload_text(title, label, kind_ar, done, total, speed, eta):
     return (
         header(title, label)
         + f"📤 <b>جاري رفع {kind_ar} إلى تيليجرام...</b>\n\n"
-        + f"{shade_bar(p)} <b>{p:.0f}%</b>\n"
-        + f"📦 {human_size(done)} / {human_size(total)}\n\n"
-        + f"🚀 السرعة: {speed_txt}\n"
-        + f"⏱️ المتبقي تقريباً: {eta_txt}"
+        + f"{upload_bar(p)}  <b>{p:.0f}%</b>\n"
+        + f"💾 المرفوع: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
+        + f"🚀 السرعة: {ltr(speed_txt)}\n"
+        + f"⏳ المتبقي: {eta_txt}"
     )
 
 
@@ -1014,14 +1063,16 @@ async def on_link(client, message):
     }
 
     kb = [
-        [btn(f"⬇️ 🎬 فيديو — {human_size(size)}", f"dl:{job_id}", "success")],
+        [btn(f"🎬 تحميل الفيديو ({ltr(human_size(size))})", f"dl:{job_id}", "success")],
         [btn("❌ إلغاء", f"cancel:{job_id}", "danger")],
     ]
     await edit_with_buttons(
         status,
-        f"<b>{html.escape(info['title'])}</b>\n\n"
-        f"<b>الحجم:</b> {human_size(size)}\n"
-        "<b>اختر لبدء التنزيل:</b>",
+        f"🎬 <b>الملف:</b> {html.escape(info['title'])}\n"
+        f"{SEP}\n\n"
+        f"📊 <b>الحجم الكلي:</b> {ltr(human_size(size))}\n"
+        f"⚙️ <b>الجودة:</b> {ltr(quality_text(info, info['title']))}\n"
+        "👇 <b>اختر الصيغة لبدء التنزيل:</b>",
         kb,
     )
 
