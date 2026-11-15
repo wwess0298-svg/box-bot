@@ -134,6 +134,40 @@ def shade_bar(p, n=15):
     return "[" + "█" * filled + "░" * (n - filled) + "]"
 
 
+# ---------- أشرطة التقدم ----------
+UPLOAD_BAR_STYLE = "boxes"   # شكل شريط الرفع. الاختيارات: "glow" أو "boxes" أو "battery"
+
+
+def ltr(text):
+    """بيمنع تلخبط ترتيب الأرقام والوحدات (MB / KB) وسط الكلام العربي."""
+    return "\u200e" + text
+
+
+def _cells(p, n):
+    return max(0, min(n, int(p / 100 * n)))
+
+
+def rocket_bar(p, n=10):
+    """شريط التحميل: مربعات زرقاء والصاروخ على راس التقدم."""
+    head = min(_cells(p, n), n - 1)
+    return "🟦" * head + "🚀" + "⬛" * (n - head - 1)
+
+
+def upload_bar(p):
+    """شريط الرفع (بيتغيّر من UPLOAD_BAR_STYLE فوق)."""
+    if UPLOAD_BAR_STYLE == "boxes":
+        n = 10
+        head = min(_cells(p, n), n - 1)
+        return "🟧" * head + "📦" + "⬛" * (n - head - 1)
+    if UPLOAD_BAR_STYLE == "battery":
+        n = 10
+        f = _cells(p, n)
+        return ("🪫" if p < 15 else "🔋") + "🟩" * f + "⬛" * (n - f)
+    n = 12
+    f = _cells(p, n)
+    return "▰" * f + "▱" * (n - f)
+
+
 def header(title):
     return f"<b>{html.escape(title)}</b>\n{SEP}\n\n"
 
@@ -143,10 +177,11 @@ def dl_text(title, done, total, speed):
     speed_txt = f"{human_size(speed)}/s" if speed else "..."
     return (
         header(title)
-        + "📥 <b>جاري تحميل الفيديو...</b>\n\n"
-        + f"{green_bar(p)}  <b>{p:.1f}%</b>\n"
-        + f"📊 الحجم: {human_size(done)} / {human_size(total)}\n"
-        + f"🚀 السرعة: {speed_txt}"
+        + "📥 <b>جاري تحميل الفيديو...</b>\n"
+        + "🚀 <i>نمط الصاروخ</i>\n\n"
+        + f"{rocket_bar(p)}  <b>{p:.1f}%</b>\n"
+        + f"📊 الحجم: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
+        + f"🚀 السرعة: {ltr(speed_txt)}"
     )
 
 
@@ -171,10 +206,10 @@ def up_text(title, done, total, speed, eta):
     return (
         header(title)
         + "📤 <b>جاري رفع الفيديو إلى تيليجرام...</b>\n\n"
-        + f"{shade_bar(p)} <b>{p:.0f}%</b>\n"
-        + f"📦 {human_size(done)} / {human_size(total)}\n\n"
-        + f"🚀 السرعة: {speed_txt}\n"
-        + f"⏱️ المتبقي تقريباً: {eta_txt}"
+        + f"{upload_bar(p)}  <b>{p:.0f}%</b>\n"
+        + f"💾 المرفوع: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
+        + f"🚀 السرعة: {ltr(speed_txt)}\n"
+        + f"⏳ المتبقي: {eta_txt}"
     )
 
 
