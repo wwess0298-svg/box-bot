@@ -144,13 +144,16 @@ def header(title, label=None):
 def download_text(title, done, total, speed):
     p = (done / total * 100) if total else 0
     speed_txt = f"{human_size(speed)}/s" if speed else "..."
+    eta = (total - done) / speed if (total and speed and total > done) else None
+    eta_txt = human_time(eta) if eta is not None else "..."
     return (
         header(title)
         + "📥 <b>جاري تحميل فيديو...</b>\n"
         + "🚀 <i>نمط الصاروخ</i>\n\n"
         + f"{rocket_bar(p)}  <b>{p:.1f}%</b>\n"
         + f"📊 الحجم: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
-        + f"🚀 السرعة: {ltr(speed_txt)}"
+        + f"🚀 السرعة: {ltr(speed_txt)}\n"
+        + f"⏳ المتبقي: {eta_txt}"
     )
 
 
@@ -597,13 +600,16 @@ def fetch_info_q(url):
 def q_download_text(title, label, kind_ar, done, total, speed):
     p = (done / total * 100) if total else 0
     speed_txt = f"{human_size(speed)}/s" if speed else "..."
+    eta = (total - done) / speed if (total and speed and total > done) else None
+    eta_txt = human_time(eta) if eta is not None else "..."
     return (
         header(title, label)
         + f"📥 <b>جاري تحميل {kind_ar}...</b>\n"
         + "🚀 <i>نمط الصاروخ</i>\n\n"
         + f"{rocket_bar(p)}  <b>{p:.1f}%</b>\n"
         + f"📊 الحجم: {ltr((human_size(done) if done else '0 B') + ' / ' + human_size(total))}\n"
-        + f"🚀 السرعة: {ltr(speed_txt)}"
+        + f"🚀 السرعة: {ltr(speed_txt)}\n"
+        + f"⏳ المتبقي: {eta_txt}"
     )
 
 
