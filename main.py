@@ -1064,8 +1064,7 @@ async def start(client, message):
 async def on_link(client, message):
     url = message.text.strip()
     if not url.lower().startswith(("http://", "https://")):
-        await message.reply_text("⚠️ من فضلك ابعت رابط صحيح يبدأ بـ http أو https.")
-        return
+        return  # مش رابط: نتجاهل الرسالة من غير أي رد
 
     # روابط Dailymotion و VK بتعرض قايمة جودات تختار منها
     if is_quality_site(url):
