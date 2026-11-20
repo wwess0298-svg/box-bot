@@ -1017,14 +1017,47 @@ async def q_run_job(client, msg, job_id, job):
 
 
 # ============================== الهاندلرز ==============================
+# رسالة الترحيب اللي بتظهر لما حد يدوس /start. غيّر الكلام اللي بين العلامتين زي ما تحب.
+# {name} هيتبدل باسم الشخص، فسيبها لو عايز الاسم يظهر.
+WELCOME_TEXT = """👋 مرحباً ({name})
+
+━━━━━━━━━━━━━━━
+
+📥 أرسل أي رابط وسأحمله لك فوراً
+
+👑 المميزات البوت :
+
+🌐 مواقع افلام او مسلسلات
+
+⛓️‍💥 الروابط مباشره التحميل
+
+🚀 تنزيل و رفع  الفيديو على البوت
+
+🌐 متاح تنزيل من VK Video / Dailymotion و الجودات تختار منها
+
+📥 تنزيل الحجم لحد 2 جيجا
+
+━━━━━━━━━━━━━━━
+
+⛓️‍💥 يلا ابعت الرابط التنزيل  🚀
+
+✅ المطور : http://t.me/Ahmed536Elsaka"""
+
+
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     name = html.escape(message.from_user.first_name or "")
-    await message.reply_text(
-        f"أهلاً بيك يا {name} في بوت التحميلات 🎬⚡\n"
-        "ابعت لي رابط الفيديو (أقل من 2 جيجا) وهحمله وأرفعه لك.\n"
-        "ولو الرابط من Dailymotion أو VK Video هعرض لك الجودات المتاحة تختار منها."
-    )
+    text = WELCOME_TEXT.replace("{name}", name)
+    payload = {
+        "chat_id": message.chat.id,
+        "text": text,
+        "parse_mode": "HTML",
+        "link_preview_options": {"is_disabled": True},   # من غير كارت معاينة للرابط
+    }
+    try:
+        await asyncio.to_thread(tg_api, "sendMessage", payload)
+    except Exception:
+        await message.reply_text(text)
 
 
 @app.on_message(filters.text & filters.private & ~filters.command(["start"]))
@@ -1069,7 +1102,7 @@ async def on_link(client, message):
     }
 
     kb = [
-        [btn(f"🎬 تحميل الفيديو ({ltr(human_size(size))})", f"dl:{job_id}", "success")],
+        [btn(f"🎬 تحميل الفيديو ({ltr(human_size(size))})", f"dl:{job_id}", "primary")],
         [btn("❌ إلغاء", f"cancel:{job_id}", "danger")],
     ]
     await edit_with_buttons(
